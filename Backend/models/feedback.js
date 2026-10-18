@@ -5,7 +5,17 @@ const attritionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true,
-    unique: true,
+  },
+
+  // Monthly feedback cycle period (e.g., "2026-10")
+  feedbackPeriod: {
+    type: String,
+    required: true,
+    index: true,
+    default: () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    },
   },
 
   // Employee's ratings
@@ -64,4 +74,9 @@ const attritionSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
-export default mongoose.model("prediction", attritionSchema);
+
+attritionSchema.index({ employeeId: 1, feedbackPeriod: 1 }, { unique: true });
+
+export default mongoose.model("EmployeeFeedback", attritionSchema, "feedback");
+
+

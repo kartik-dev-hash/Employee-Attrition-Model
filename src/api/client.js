@@ -1,7 +1,8 @@
 import axios from "axios";
 
-// Base API URL pointing to the existing Node/Express backend
-const API_BASE_URL = "http://localhost:5000";
+// Derive backend URL from current browser host so other devices on the same
+// Wi-Fi network can reach the backend automatically (no hardcoded IP needed).
+const API_BASE_URL = `http://${window.location.hostname}:5000`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

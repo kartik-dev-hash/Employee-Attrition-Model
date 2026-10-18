@@ -3,9 +3,9 @@ import api from "../../api/client";
 import { DataTable } from "../../components/common/DataTable";
 import { StatusBadge } from "../../components/common/Badge";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
-import { Modal } from "../../components/common/Modal";
 import { RatingStars } from "../../components/common/RatingStars";
-import { Users, Eye, RefreshCw, Clock } from "lucide-react";
+import { Users, Eye, RefreshCw, Clock, ShieldAlert } from "lucide-react";
+import { EmployeeDetailView } from "../../components/hr-analytics/EmployeeDetailView";
 
 export const EmployeeDirectory = () => {
   const [employees, setEmployees] = useState([]);
@@ -15,6 +15,7 @@ export const EmployeeDirectory = () => {
   // Selected Employee Modal
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [selectedEmpFeedback, setSelectedEmpFeedback] = useState(null);
+  const [modalTab, setModalTab] = useState("overview"); // 'overview' | 'retention'
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -35,7 +36,19 @@ export const EmployeeDirectory = () => {
 
   const handleViewEmployee = (emp) => {
     setSelectedEmp(emp);
-    const foundFeed = feedbacks.find((f) => f.employeeId === emp._id || f.employeeId?._id === emp._id);
+    setModalTab("overview");
+    const foundFeed = feedbacks.find(
+      (f) => f.employeeId === emp._id || f.employeeId?._id === emp._id,
+    );
+    setSelectedEmpFeedback(foundFeed || null);
+  };
+
+  const handleOpenRetention = (emp) => {
+    setSelectedEmp(emp);
+    setModalTab("retention");
+    const foundFeed = feedbacks.find(
+      (f) => f.employeeId === emp._id || f.employeeId?._id === emp._id,
+    );
     setSelectedEmpFeedback(foundFeed || null);
   };
 
@@ -84,16 +97,68 @@ export const EmployeeDirectory = () => {
         ),
     },
     {
+      header: "Attrition Risk",
+      cell: (row) => {
+        const ml = row.mlPrediction;
+        if (!ml?.isAvailable) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+              Not Evaluated
+            </span>
+          );
+        }
+        const isHigh = ml.outcome === "Yes";
+        const pct =
+          ml.probability != null ? `${(ml.probability * 100).toFixed(1)}%` : "";
+        if (isHigh) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block animate-pulse" />
+              High Risk {pct && <span className="opacity-75">· {pct}</span>}
+            </span>
+          );
+        }
+        const prob = ml.probability ?? 0;
+        if (prob >= 0.35) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+              Medium Risk {pct && <span className="opacity-75">· {pct}</span>}
+            </span>
+          );
+        }
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            Low Risk {pct && <span className="opacity-75">· {pct}</span>}
+          </span>
+        );
+      },
+    },
+    {
       header: "Action",
       align: "center",
       cell: (row) => (
-        <button
-          onClick={() => handleViewEmployee(row)}
-          className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl transition-colors font-medium text-xs flex items-center gap-1 mx-auto cursor-pointer"
-        >
-          <Eye className="w-4 h-4" />
-          <span>View Details</span>
-        </button>
+        <div className="flex items-center justify-center gap-1.5">
+          <button
+            onClick={() => handleViewEmployee(row)}
+            className="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl transition-colors font-medium text-xs flex items-center gap-1 cursor-pointer"
+            title="View Details"
+          >
+            <Eye className="w-4 h-4" />
+            <span>Details</span>
+          </button>
+
+          <button
+            onClick={() => handleOpenRetention(row)}
+            className="p-1.5 text-amber-700 hover:text-amber-900 hover:bg-amber-50 rounded-xl transition-colors font-semibold text-xs flex items-center gap-1 cursor-pointer"
+            title="Open Retention Action Center"
+          >
+            <ShieldAlert className="w-4 h-4 text-amber-600" />
+            <span>Action</span>
+          </button>
+        </div>
       ),
     },
   ];
@@ -102,12 +167,32 @@ export const EmployeeDirectory = () => {
     return <LoadingSpinner label="Loading employee directory..." />;
   }
 
+  // When an employee is selected, render full-page details view (like View Analytics)
+  if (selectedEmp) {
+    return (
+      <EmployeeDetailView
+        employee={selectedEmp}
+        feedback={selectedEmpFeedback}
+        initialTab={modalTab}
+        onBack={() => {
+          setSelectedEmp(null);
+          setSelectedEmpFeedback(null);
+        }}
+        onRefresh={fetchEmployees}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Employee Directory</h2>
-          <p className="text-xs text-slate-500">Manage and inspect registered workforce members</p>
+          <h2 className="text-xl font-bold text-slate-900">
+            Employee Directory
+          </h2>
+          <p className="text-xs text-slate-500">
+            Manage and inspect registered workforce members
+          </p>
         </div>
 
         <button
@@ -136,101 +221,6 @@ export const EmployeeDirectory = () => {
         emptyTitle="No employees found"
         emptyDescription="No employee records match your search query."
       />
-
-      {/* Employee Detail Modal */}
-      <Modal
-        isOpen={!!selectedEmp}
-        onClose={() => setSelectedEmp(null)}
-        title={selectedEmp?.fullName || "Employee Details"}
-        subtitle={`Employee Code: ${selectedEmp?.employeeCode || "N/A"}`}
-        icon={Users}
-        maxWidth="max-w-3xl"
-      >
-        {selectedEmp && (
-          <div className="space-y-6">
-            {/* Overview Box */}
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-              <div>
-                <span className="text-slate-400 font-semibold block">Full Name</span>
-                <span className="font-bold text-slate-800">{selectedEmp.fullName}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 font-semibold block">Email</span>
-                <span className="font-bold text-slate-800">{selectedEmp.email}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 font-semibold block">Company Code</span>
-                <span className="font-bold text-slate-800 uppercase">{selectedEmp.companyCode}</span>
-              </div>
-            </div>
-
-            {/* Feedback Detail */}
-            {!selectedEmpFeedback ? (
-              <div className="p-6 bg-amber-50/70 border border-amber-200/80 rounded-2xl text-center space-y-2">
-                <Clock className="w-8 h-8 text-amber-500 mx-auto" />
-                <h4 className="text-sm font-bold text-amber-900">Feedback Not Submitted Yet</h4>
-                <p className="text-xs text-amber-700">
-                  This employee has not completed their workplace feedback survey for the current period.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <h4 className="text-sm font-bold text-slate-800">Submitted Ratings</h4>
-                  <StatusBadge type="submitted" label="Verified Feedback" />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-xs font-semibold text-slate-500 block mb-1">Job Satisfaction</span>
-                    <RatingStars value={selectedEmpFeedback.jobSatisfaction} disabled />
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-xs font-semibold text-slate-500 block mb-1">Work Environment</span>
-                    <RatingStars value={selectedEmpFeedback.workEnvironment} disabled />
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-xs font-semibold text-slate-500 block mb-1">Work-Life Balance</span>
-                    <RatingStars value={selectedEmpFeedback.workLifeBalance} disabled />
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-xs font-semibold text-slate-500 block mb-1">Growth Opportunities</span>
-                    <RatingStars value={selectedEmpFeedback.growth} disabled />
-                  </div>
-                </div>
-
-                {/* Qualitative Responses */}
-                <div className="space-y-3 pt-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-600">Qualitative Responses</h4>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                    <strong className="block text-slate-700 mb-1">Manager & Team Support</strong>
-                    <p className="text-slate-600">{selectedEmpFeedback.manager || "No response"}</p>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                    <strong className="block text-slate-700 mb-1">What Employee Liked Most</strong>
-                    <p className="text-slate-600">{selectedEmpFeedback.likedMost || "No response"}</p>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                    <strong className="block text-slate-700 mb-1">Suggested Improvements</strong>
-                    <p className="text-slate-600">{selectedEmpFeedback.improvement || "No response"}</p>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                    <strong className="block text-slate-700 mb-1">Additional Comments</strong>
-                    <p className="text-slate-600">{selectedEmpFeedback.comments || "No comments"}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

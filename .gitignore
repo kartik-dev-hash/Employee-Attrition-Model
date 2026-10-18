@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment secrets — NEVER commit these
+.env
+Backend/.env
+*.env
+
+# Python ML artifacts and cache
+*.joblib
+*.pkl
+__pycache__/
+*.pyc
+*.pyo

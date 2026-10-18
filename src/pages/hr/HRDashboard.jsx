@@ -20,6 +20,8 @@ import {
   Mail,
   Lock,
   User,
+  MailCheck,
+  Send,
 } from "lucide-react";
 
 export const HRDashboard = () => {
@@ -45,6 +47,9 @@ export const HRDashboard = () => {
     password: "",
   });
 
+  const [reminderStatus, setReminderStatus] = useState(null);
+  const [triggeringReminder, setTriggeringReminder] = useState(false);
+
   const fetchEmployeesData = async () => {
     try {
       const response = await api.get("/hr/employees");
@@ -56,8 +61,18 @@ export const HRDashboard = () => {
     }
   };
 
+  const fetchReminderStatus = async () => {
+    try {
+      const response = await api.get("/api/hr/reminders/status");
+      setReminderStatus(response.data);
+    } catch (err) {
+      console.warn("Notice: Reminder status endpoint:", err.message);
+    }
+  };
+
   useEffect(() => {
     fetchEmployeesData();
+    fetchReminderStatus();
   }, []);
 
   const handleInputChange = (e) => {
@@ -143,6 +158,48 @@ export const HRDashboard = () => {
     }
   };
 
+  const handleTriggerInvitations = async () => {
+    setTriggeringReminder(true);
+    try {
+      const response = await api.post("/api/hr/reminders/send-invitations");
+      const resData = response.data?.result;
+      setToast({
+        type: "success",
+        text: `Invitations sent to ${resData?.sent || 0} employees (${resData?.skippedAlreadySubmitted || 0} already submitted, ${resData?.skippedAlreadyNotified || 0} already notified).`,
+      });
+      fetchEmployeesData();
+      fetchReminderStatus();
+    } catch (err) {
+      setToast({
+        type: "error",
+        text: err.response?.data?.message || "Failed to trigger invitations.",
+      });
+    } finally {
+      setTriggeringReminder(false);
+    }
+  };
+
+  const handleTriggerReminders = async () => {
+    setTriggeringReminder(true);
+    try {
+      const response = await api.post("/api/hr/reminders/send-reminders");
+      const resData = response.data?.result;
+      setToast({
+        type: "success",
+        text: `Reminders sent to ${resData?.sent || 0} pending employees (${resData?.skippedAlreadySubmitted || 0} already submitted, ${resData?.skippedAlreadyReminded || 0} already reminded).`,
+      });
+      fetchEmployeesData();
+      fetchReminderStatus();
+    } catch (err) {
+      setToast({
+        type: "error",
+        text: err.response?.data?.message || "Failed to trigger reminders.",
+      });
+    } finally {
+      setTriggeringReminder(false);
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner label="Loading HR Dashboard Analytics..." />;
   }
@@ -151,8 +208,14 @@ export const HRDashboard = () => {
   const submittedCount = data.submittedCount || 0;
   const pendingCount = data.pendingFeedbacks || 0;
 
-  // Calculate high risk count based on actual prediction or feedback scores
-  const highRiskCount = data.feedbacks?.filter((f) => f.prediction === "Yes" || f.probability > 0.5).length || 0;
+  // Calculate high risk from feedback scores (avg ≤ 2.5 = high risk, matching backend threshold)
+  const highRiskCount = data.feedbacks?.filter((f) => {
+    const scores = [f.jobSatisfaction, f.workEnvironment, f.workLifeBalance, f.growth].filter(
+      (s) => typeof s === "number"
+    );
+    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+    return avg !== null && avg <= 2.5;
+  }).length || 0;
 
   return (
     <div className="space-y-6">
@@ -254,7 +317,7 @@ export const HRDashboard = () => {
               <p className="text-xs text-slate-500 py-6 text-center">No employees registered yet.</p>
             ) : (
               <div className="divide-y divide-slate-100">
-                {data.employees.slice(0, 5).map((emp) => (
+                {data.employees.slice(0, 7).map((emp) => (
                   <div key={emp._id} className="py-3 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white font-bold text-sm flex items-center justify-center shadow-xs">
@@ -318,6 +381,59 @@ export const HRDashboard = () => {
                   <p className="text-[11px] text-indigo-700">Grant co-HR workspace privileges</p>
                 </div>
               </button>
+            </div>
+          </Card>
+
+          {/* Monthly Cycle & Automated Email Reminders Control */}
+          <Card
+            title={`Feedback Cycle (${reminderStatus?.periodLabel || "Current Month"})`}
+            subtitle="Automated monthly reminders status"
+          >
+            <div className="space-y-3">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-slate-400 block font-semibold text-[11px]">Period Completion</span>
+                  <span className="font-extrabold text-slate-800">
+                    {reminderStatus?.submittedCount || data.submittedCount || 0} / {reminderStatus?.totalEmployees || data.employees?.length || 0} Submitted
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-400 block font-semibold text-[11px]">Email Engine</span>
+                  <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] uppercase ${
+                    reminderStatus?.isLiveSmtpEnabled || reminderStatus?.emailEngine?.includes("EmailJS")
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {reminderStatus?.emailEngine || (reminderStatus?.isLiveSmtpEnabled ? "SMTP Live" : "EmailJS Active")}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  onClick={handleTriggerInvitations}
+                  disabled={triggeringReminder}
+                  className="p-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 text-[11px]"
+                  title="Dispatch initial invitation to eligible employees for current month"
+                >
+                  <Send className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Send Invites</span>
+                </button>
+
+                <button
+                  onClick={handleTriggerReminders}
+                  disabled={triggeringReminder}
+                  className="p-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 text-[11px]"
+                  title="Send 7-day reminder only to employees who haven't submitted yet"
+                >
+                  <MailCheck className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Send Reminders</span>
+                </button>
+              </div>
+
+              <p className="text-[10px] text-slate-400 text-center">
+                Automated monthly schedule: 1st of month (invite) & 8th of month (follow-up).
+              </p>
             </div>
           </Card>
         </div>

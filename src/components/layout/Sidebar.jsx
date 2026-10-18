@@ -12,13 +12,16 @@ import {
   MessageSquareText,
   TrendingUp,
   Building2,
-  UserPlus,
   Settings,
   LogOut,
   Sparkles,
   ShieldCheck,
   ChevronLeft,
   ChevronRight,
+  BarChart3,
+  UserCog,
+  Bot,
+  CalendarClock,
 } from "lucide-react";
 
 export const Sidebar = ({ isOpen, toggleSidebar, isMobileOpen, closeMobile }) => {
@@ -35,6 +38,7 @@ export const Sidebar = ({ isOpen, toggleSidebar, isMobileOpen, closeMobile }) =>
     { label: "My Profile", path: "/employee/profile", icon: User },
     { label: "Give Feedback", path: "/employee/feedback", icon: MessageSquarePlus },
     { label: "Feedback History", path: "/employee/history", icon: History },
+    { label: "My Meetings", path: "/employee/meetings", icon: CalendarClock },
     { label: "Resources", path: "/employee/resources", icon: BookOpen },
     { label: "Help & Support", path: "/employee/support", icon: HelpCircle },
   ];
@@ -44,12 +48,23 @@ export const Sidebar = ({ isOpen, toggleSidebar, isMobileOpen, closeMobile }) =>
     { label: "Employees", path: "/hr/employees", icon: Users },
     { label: "Feedback", path: "/hr/feedback", icon: MessageSquareText },
     { label: "Attrition Insights", path: "/hr/attrition", icon: TrendingUp },
+    { label: "AI Retention Agent", path: "/hr/retention-cases", icon: Bot },
     { label: "Company", path: "/hr/company", icon: Building2 },
-    { label: "HR Management", path: "/hr/management", icon: UserPlus },
     { label: "Settings", path: "/hr/settings", icon: Settings },
   ];
 
-  const navItems = role === "hr" ? hrNavItems : employeeNavItems;
+  const adminNavItems = [
+    { label: "Company Management", path: "/admin/companies", icon: Building2 },
+    { label: "User & Admin Management", path: "/admin/users", icon: UserCog },
+    { label: "Platform Analytics", path: "/admin/analytics", icon: BarChart3 },
+  ];
+
+  const navItems =
+    role === "hr"
+      ? hrNavItems
+      : role === "platformAdmin"
+      ? adminNavItems
+      : employeeNavItems;
 
   return (
     <>
@@ -84,7 +99,11 @@ export const Sidebar = ({ isOpen, toggleSidebar, isMobileOpen, closeMobile }) =>
                 </span>
                 <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
-                  {role === "hr" ? "HR Admin Portal" : "Employee Portal"}
+                  {role === "platformAdmin"
+                    ? "Platform Admin"
+                    : role === "hr"
+                    ? "HR Admin Portal"
+                    : "Employee Portal"}
                 </span>
               </div>
             )}

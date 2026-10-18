@@ -2,7 +2,9 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppLayout } from "./components/layout/AppLayout";
-import { PlatformAdmin } from "./pages/PlatformAdmin";
+import { CompanyManagement } from "./pages/admin/CompanyManagement";
+import { UserAdminManagement } from "./pages/admin/UserAdminManagement";
+import { PlatformAnalytics } from "./pages/admin/PlatformAnalytics";
 
 // Auth Pages
 import { Login } from "./pages/auth/Login";
@@ -15,6 +17,7 @@ import { GiveFeedback } from "./pages/employee/GiveFeedback";
 import { FeedbackHistory } from "./pages/employee/FeedbackHistory";
 import { Resources } from "./pages/employee/Resources";
 import { HelpSupport } from "./pages/employee/HelpSupport";
+import { MeetingInvitations } from "./pages/employee/MeetingInvitations";
 
 // HR Pages
 import { HRDashboard } from "./pages/hr/HRDashboard";
@@ -24,6 +27,7 @@ import { AttritionInsights } from "./pages/hr/AttritionInsights";
 import { HRManagement } from "./pages/hr/HRManagement";
 import { CompanyOverview } from "./pages/hr/CompanyOverview";
 import { Settings } from "./pages/hr/Settings";
+import { RetentionCases } from "./pages/hr/RetentionCases";
 
 // Role-based route guard
 const ProtectedRoute = ({ allowedRole, children }) => {
@@ -85,6 +89,7 @@ function AppRoutes() {
         <Route path="history" element={<FeedbackHistory />} />
         <Route path="resources" element={<Resources />} />
         <Route path="support" element={<HelpSupport />} />
+        <Route path="meetings" element={<MeetingInvitations />} />
       </Route>
 
       {/* Protected HR Portal Routes */}
@@ -104,6 +109,7 @@ function AppRoutes() {
         <Route path="management" element={<HRManagement />} />
         <Route path="company" element={<CompanyOverview />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="retention-cases" element={<RetentionCases />} />
       </Route>
 
       {/* Platform Admin Routes */}
@@ -115,7 +121,11 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route path="dashboard" element={<PlatformAdmin />} />
+        <Route index element={<Navigate to="/admin/companies" replace />} />
+        <Route path="dashboard" element={<Navigate to="/admin/companies" replace />} />
+        <Route path="companies" element={<CompanyManagement />} />
+        <Route path="users" element={<UserAdminManagement />} />
+        <Route path="analytics" element={<PlatformAnalytics />} />
       </Route>
       {/* Catch-all Fallback */}
       <Route path="*" element={<RootRedirect />} />

@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import api from "../../api/client";
 import { DataTable } from "../../components/common/DataTable";
 import { RatingStars } from "../../components/common/RatingStars";
-import { Modal } from "../../components/common/Modal";
 import { LoadingSpinner } from "../../components/common/LoadingSpinner";
-import { MessageSquareText, Eye } from "lucide-react";
+import { Eye } from "lucide-react";
+import { EmployeeDetailView } from "../../components/hr-analytics/EmployeeDetailView";
 
 export const FeedbackExplorer = () => {
   const [employees, setEmployees] = useState([]);
@@ -35,9 +35,11 @@ export const FeedbackExplorer = () => {
     const emp = employees.find((e) => e._id === feed.employeeId || e._id === feed.employeeId?._id);
     return {
       ...feed,
+      employee: emp,
       employeeName: emp?.fullName || "Employee",
       employeeEmail: emp?.email || "",
       employeeCode: emp?.employeeCode || "N/A",
+      mlPrediction: emp?.mlPrediction,
       avgRating: (
         ((feed.jobSatisfaction || 0) +
           (feed.workEnvironment || 0) +
@@ -96,6 +98,45 @@ export const FeedbackExplorer = () => {
       ),
     },
     {
+      header: "Attrition Risk",
+      cell: (row) => {
+        const ml = row.mlPrediction;
+        if (!ml?.isAvailable) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+              Not Evaluated
+            </span>
+          );
+        }
+        const isHigh = ml.outcome === "Yes";
+        const pct = ml.probability != null ? `${(ml.probability * 100).toFixed(1)}%` : "";
+        if (isHigh) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block animate-pulse" />
+              High Risk {pct && <span className="opacity-75">· {pct}</span>}
+            </span>
+          );
+        }
+        const prob = ml.probability ?? 0;
+        if (prob >= 0.35) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+              Medium Risk {pct && <span className="opacity-75">· {pct}</span>}
+            </span>
+          );
+        }
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            Low Risk {pct && <span className="opacity-75">· {pct}</span>}
+          </span>
+        );
+      },
+    },
+    {
       header: "Action",
       align: "center",
       cell: (row) => (
@@ -114,6 +155,30 @@ export const FeedbackExplorer = () => {
     return <LoadingSpinner label="Loading feedback explorer..." />;
   }
 
+  // When a feedback response is selected, render full-page details view (matching View Details & Analytics)
+  if (selectedItem) {
+    const empObj = selectedItem.employee || {
+      _id: selectedItem.employeeId?._id || selectedItem.employeeId,
+      fullName: selectedItem.employeeName,
+      email: selectedItem.employeeEmail,
+      employeeCode: selectedItem.employeeCode,
+      mlPrediction: selectedItem.mlPrediction,
+      companyCode: selectedItem.companyCode,
+      role: "Employee",
+    };
+
+    return (
+      <EmployeeDetailView
+        employee={empObj}
+        feedback={selectedItem}
+        initialTab="overview"
+        backLabel="Back to Feedback Explorer"
+        onBack={() => setSelectedItem(null)}
+        onRefresh={fetchData}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -129,77 +194,6 @@ export const FeedbackExplorer = () => {
         emptyTitle="No Feedback Submissions Found"
         emptyDescription="None of your registered employees have submitted a feedback survey yet."
       />
-
-      {/* Detailed Response Modal */}
-      <Modal
-        isOpen={!!selectedItem}
-        onClose={() => setSelectedItem(null)}
-        title={`Feedback from ${selectedItem?.employeeName}`}
-        subtitle={`Employee Code: ${selectedItem?.employeeCode}`}
-        icon={MessageSquareText}
-        maxWidth="max-w-3xl"
-      >
-        {selectedItem && (
-          <div className="space-y-6">
-            {/* Header Score Overview */}
-            <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center justify-between">
-              <div>
-                <span className="text-xs font-semibold text-indigo-600 block">Overall Feedback Score</span>
-                <span className="text-2xl font-extrabold text-indigo-900">★ {selectedItem.avgRating} / 5.0</span>
-              </div>
-              <div className="text-right">
-                <span className="text-[11px] text-slate-500 block">Manager Sentiment</span>
-                <span className="text-xs font-bold text-slate-800 bg-white px-3 py-1 rounded-full border border-slate-200">
-                  {selectedItem.manager || "N/A"}
-                </span>
-              </div>
-            </div>
-
-            {/* Ratings Breakdown */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-xs font-bold text-slate-700 block mb-1">Job Satisfaction</span>
-                <RatingStars value={selectedItem.jobSatisfaction} disabled />
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-xs font-bold text-slate-700 block mb-1">Work Environment</span>
-                <RatingStars value={selectedItem.workEnvironment} disabled />
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-xs font-bold text-slate-700 block mb-1">Work-Life Balance</span>
-                <RatingStars value={selectedItem.workLifeBalance} disabled />
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-xs font-bold text-slate-700 block mb-1">Growth Opportunities</span>
-                <RatingStars value={selectedItem.growth} disabled />
-              </div>
-            </div>
-
-            {/* Written Statements */}
-            <div className="space-y-3 pt-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Employee Comments</h4>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
-                <strong className="block text-slate-800 mb-1">What the Employee Likes Most</strong>
-                <p className="text-slate-600 leading-relaxed">{selectedItem.likedMost || "No response provided."}</p>
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
-                <strong className="block text-slate-800 mb-1">Suggested Workplace Improvements</strong>
-                <p className="text-slate-600 leading-relaxed">{selectedItem.improvement || "No response provided."}</p>
-              </div>
-
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
-                <strong className="block text-slate-800 mb-1">Additional Comments</strong>
-                <p className="text-slate-600 leading-relaxed">{selectedItem.comments || "No additional comments."}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };
