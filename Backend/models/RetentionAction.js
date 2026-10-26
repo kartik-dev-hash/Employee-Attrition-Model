@@ -26,9 +26,63 @@ const retentionActionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Pending", "In Progress", "Completed", "Cancelled"],
+      enum: [
+        "Pending",
+        "In Progress",
+        "Completed",
+        "Cancelled",
+        "PROPOSED",
+        "PENDING_APPROVAL",
+        "APPROVED",
+        "FAILED",
+      ],
       default: "Pending",
       index: true,
+    },
+
+    // ── n8n AI Agent & Meeting Proposal Fields ────────────────────────────
+    proposalStatus: {
+      type: String,
+      enum: ["NONE", "PROPOSED", "APPROVED", "REJECTED", "FAILED"],
+      default: "NONE",
+      index: true,
+    },
+    proposalSource: {
+      type: String, // "n8n_agent" | "internal_fallback" | "none"
+      default: "none",
+    },
+    meetingPurpose: {
+      type: String,
+      default: "Confidential Retention & Feedback Discussion",
+      trim: true,
+    },
+    meetingAgenda: {
+      type: String,
+      default: "",
+    },
+    invitationDraft: {
+      subject: { type: String, default: "" },
+      message: { type: String, default: "" },
+    },
+    proposalNotes: {
+      type: String,
+      default: "",
+    },
+    proposedAt: {
+      type: Date,
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    approvedBy: {
+      type: String,
+      default: "",
+    },
+    rejectionReason: {
+      type: String,
+      default: "",
     },
 
     // ── Retention Agent fields ────────────────────────────────────────────

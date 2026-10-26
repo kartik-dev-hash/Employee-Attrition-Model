@@ -904,5 +904,487 @@ router.get("/employee-invitation/my", async (req, res) => {
   }
 });
 
+// ============================================================================
+// n8n AI RETENTION AGENT MEETING SCHEDULING & APPROVAL ENDPOINTS
+// ============================================================================
+
+const generateMeetLink = (employeeCode) => {
+  const room = `RetainPulse-${(employeeCode || "meeting").replace(/[^a-zA-Z0-9]/g, "")}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  return `https://meet.jit.si/${room}`;
+};
+
+// GET /api/hr/high-risk-employees
+// Returns all employees meeting attrition risk thresholds in the HR's company
+router.get(["/high-risk-employees", "/retention/high-risk-employees"], async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const { evaluateAllEmployees } = await import("../services/retentionRuleEngine.js");
+    const User = (await import("../models/User.js")).default;
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+
+    const evaluations = await evaluateAllEmployees(hr.companyCode);
+    const eligible = evaluations.filter((item) => item.evaluation.eligible);
+
+    const enriched = await Promise.all(
+      eligible.map(async (item) => {
+        const emp = await User.findById(item.employeeId)
+          .select("fullName email employeeCode phoneNumber createdAt")
+          .lean();
+
+        const actionRecord = await RetentionAction.findOne({
+          employeeId: item.employeeId,
+          companyCode: hr.companyCode.toUpperCase(),
+        }).lean();
+
+        return {
+          employeeId: item.employeeId,
+          employee: emp,
+          evaluation: item.evaluation.details,
+          triggeredRules: item.evaluation.details.triggeredRules,
+          mlProbability: item.evaluation.details.mlProbability,
+          surveyRiskLevel: item.evaluation.details.surveyRiskLevel,
+          meetingStatus: actionRecord?.status || "NONE",
+          proposalStatus: actionRecord?.proposalStatus || "NONE",
+          meetingDate: actionRecord?.meetingDate || "",
+          meetingTime: actionRecord?.meetingTime || "",
+          meetingLink: actionRecord?.meetingLink || "",
+          invitationStatus: actionRecord?.invitationStatus || "Pending",
+          actionRecord,
+        };
+      })
+    );
+
+    res.status(200).json({
+      count: enriched.length,
+      highRiskEmployees: enriched,
+    });
+  } catch (error) {
+    console.error("Error fetching high-risk employees:", error);
+    res.status(500).json({ message: "Failed to fetch high-risk employees.", error: error.message });
+  }
+});
+
+// POST /api/hr/retention-meetings/propose (and /retention-meetings/propose/:employeeId)
+// Dispatches meeting proposal request to external n8n AI Agent or internal fallback
+const handleProposeMeeting = async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const employeeId = req.params.employeeId || req.body.employeeId;
+    if (!employeeId) {
+      return res.status(400).json({ message: "employeeId is required." });
+    }
+
+    const User = (await import("../models/User.js")).default;
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+    const { evaluateEmployee } = await import("../services/retentionRuleEngine.js");
+    const { findAvailableSlot } = await import("../services/meetingScheduler.js");
+    const { callN8nRetentionAgent, generateInternalRetentionProposal } = await import(
+      "../services/n8nService.js"
+    );
+
+    // 1. Verify employee belongs to HR's authorized company
+    const employee = await User.findOne({
+      _id: employeeId,
+      companyCode: hr.companyCode.toUpperCase(),
+      role: "employee",
+    }).select("_id fullName email employeeCode companyCode phoneNumber");
+
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found in your authorized organization." });
+    }
+
+    // 2. Evaluate risk eligibility
+    const evaluation = await evaluateEmployee(employeeId, hr.companyCode);
+    if (!evaluation.eligible) {
+      return res.status(400).json({
+        eligible: false,
+        message: "Employee does not meet high-risk threshold for retention scheduling.",
+        reason: evaluation.reason,
+      });
+    }
+
+    // 3. Prevent duplicate proposals if active meeting already confirmed
+    const existing = await RetentionAction.findOne({
+      employeeId,
+      companyCode: hr.companyCode.toUpperCase(),
+      status: { $in: ["In Progress", "APPROVED", "Completed"] },
+      meetingDate: { $ne: "" },
+    }).lean();
+
+    if (existing && existing.status !== "Cancelled") {
+      return res.status(409).json({
+        message: "An active retention meeting is already scheduled for this employee.",
+        existingMeeting: {
+          meetingDate: existing.meetingDate,
+          meetingTime: existing.meetingTime,
+          status: existing.status,
+          invitationStatus: existing.invitationStatus,
+        },
+      });
+    }
+
+    // 4. Find internal conflict-free slot as reference/fallback
+    const availableSlot = await findAvailableSlot(hr.companyCode);
+
+    // 5. Contact external n8n AI Agent
+    const n8nPayload = {
+      employeeId: employee._id.toString(),
+      employeeName: employee.fullName,
+      employeeCode: employee.employeeCode,
+      riskLevel: evaluation.details.surveyRiskLevel || "HIGH_RISK",
+      mlProbability: evaluation.details.mlProbability,
+      riskFactors: evaluation.details.triggeredRules || [],
+      purpose: req.body.purpose || "Confidential Retention & Feedback Discussion",
+      notes: req.body.notes || "",
+      preferredDate: req.body.preferredDate || null,
+      preferredTime: req.body.preferredTime || null,
+      hrName: hr.fullName || "HR Representative",
+      hrEmail: hr.email || "",
+    };
+
+    const n8nResult = await callN8nRetentionAgent(n8nPayload);
+
+    let finalProposal;
+    let proposalSource;
+
+    if (n8nResult.success && n8nResult.proposal) {
+      proposalSource = "n8n_agent";
+      finalProposal = {
+        ...n8nResult.proposal,
+        // If n8n did not propose date/time, pair with internal available slot
+        proposedDate: n8nResult.proposal.proposedDate || availableSlot?.meetingDate || req.body.preferredDate || "",
+        proposedTime: n8nResult.proposal.proposedTime || availableSlot?.meetingTime || req.body.preferredTime || "",
+      };
+    } else {
+      // Internal deterministic fallback
+      proposalSource = "internal_fallback";
+      finalProposal = generateInternalRetentionProposal(n8nPayload, availableSlot);
+    }
+
+    // 6. Save proposal into RetentionAction with PROPOSED status (requires HR approval)
+    const updated = await RetentionAction.findOneAndUpdate(
+      { employeeId: employee._id, companyCode: hr.companyCode.toUpperCase() },
+      {
+        $set: {
+          status: "PROPOSED",
+          proposalStatus: "PROPOSED",
+          proposalSource,
+          meetingPurpose: finalProposal.purpose || req.body.purpose || "Confidential Retention & Feedback Discussion",
+          meetingAgenda: finalProposal.agenda || "",
+          invitationDraft: finalProposal.invitationDraft || {},
+          meetingDate: finalProposal.proposedDate || "",
+          meetingTime: finalProposal.proposedTime || "",
+          proposalNotes: req.body.notes || "",
+          proposedAt: new Date(),
+          assignedHR: hr.fullName || "HR Representative",
+          assignedHRId: hr._id,
+          riskSnapshot: {
+            mlProbability: evaluation.details.mlProbability,
+            mlOutcome: evaluation.details.mlOutcome,
+            surveyRiskLevel: evaluation.details.surveyRiskLevel,
+            surveyRiskScore: evaluation.details.surveyRiskScore,
+            triggeredRules: evaluation.details.triggeredRules,
+          },
+        },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
+
+    res.status(200).json({
+      success: true,
+      proposalStatus: "PROPOSED",
+      proposalSource,
+      isFallback: n8nResult.isFallback || false,
+      fallbackReason: n8nResult.reason || null,
+      proposal: finalProposal,
+      actionRecord: updated,
+    });
+  } catch (error) {
+    console.error("Error proposing retention meeting:", error);
+    res.status(500).json({ message: "Failed to generate retention meeting proposal.", error: error.message });
+  }
+};
+
+router.post("/retention-meetings/propose", handleProposeMeeting);
+router.post("/retention-meetings/propose/:employeeId", handleProposeMeeting);
+router.post("/retention/propose-meeting/:employeeId", handleProposeMeeting);
+
+// POST /api/hr/retention-meetings/:id/approve
+// HR reviews and approves proposed retention meeting, reserves slot and sends invitation
+const handleApproveMeeting = async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const targetId = req.params.id;
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+    const User = (await import("../models/User.js")).default;
+    const mongoose = (await import("mongoose")).default;
+    const { reserveSlot } = await import("../services/meetingScheduler.js");
+    const { sendMeetingInvitationEmail } = await import("../services/emailService.js");
+
+    const query = {
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(targetId) ? new mongoose.Types.ObjectId(targetId) : null },
+        { employeeId: mongoose.Types.ObjectId.isValid(targetId) ? new mongoose.Types.ObjectId(targetId) : null },
+      ].filter((q) => Object.values(q)[0] !== null),
+      companyCode: hr.companyCode.toUpperCase(),
+    };
+
+    const actionRecord = await RetentionAction.findOne(query);
+    if (!actionRecord) {
+      return res.status(404).json({ message: "Retention meeting record not found." });
+    }
+
+    const employee = await User.findById(actionRecord.employeeId)
+      .select("fullName email employeeCode phoneNumber companyCode")
+      .lean();
+
+    if (!employee) {
+      return res.status(404).json({ message: "Associated employee record not found." });
+    }
+
+    // Read HR edits or fallback to proposed values
+    const finalDate = req.body.meetingDate || actionRecord.meetingDate;
+    const finalTime = req.body.meetingTime || actionRecord.meetingTime;
+    const finalPurpose = req.body.meetingPurpose || actionRecord.meetingPurpose || "Confidential Retention Discussion";
+    const finalAgenda = req.body.meetingAgenda || actionRecord.meetingAgenda || "";
+    const finalLocation = req.body.meetingLocation || actionRecord.meetingLocation || "Virtual 1-on-1 (Online)";
+    const finalLink = req.body.meetingLink || actionRecord.meetingLink || generateMeetLink(employee.employeeCode);
+
+    if (!finalDate || !finalTime) {
+      return res.status(400).json({ message: "Meeting date and time are required to approve the meeting." });
+    }
+
+    // Atomically reserve slot to prevent conflict
+    const slotReserved = await reserveSlot({
+      employeeId: employee._id,
+      companyCode: hr.companyCode,
+      meetingDate: finalDate,
+      meetingTime: finalTime,
+      hrUser: hr,
+    });
+
+    if (!slotReserved) {
+      return res.status(409).json({
+        message: `The slot on ${finalDate} at ${finalTime} is already booked. Please choose an alternative slot.`,
+      });
+    }
+
+    // Dispatch email invitation to employee (best-effort, does not fail DB save)
+    let emailResult = { success: false, reason: "No email address found." };
+    if (employee.email) {
+      try {
+        emailResult = await sendMeetingInvitationEmail({
+          toEmail: employee.email,
+          employeeName: employee.fullName,
+          meetingDate: finalDate,
+          meetingTime: finalTime,
+          meetingDetails: `${finalPurpose} — ${finalAgenda}`,
+          meetingLink: finalLink,
+        });
+      } catch (emailErr) {
+        emailResult = { success: false, reason: emailErr.message };
+      }
+    }
+
+    // Update RetentionAction with APPROVED state
+    const updated = await RetentionAction.findOneAndUpdate(
+      { _id: actionRecord._id },
+      {
+        $set: {
+          status: "APPROVED",
+          proposalStatus: "APPROVED",
+          invitationStatus: "Pending",
+          meetingDate: finalDate,
+          meetingTime: finalTime,
+          meetingLocation: finalLocation,
+          meetingLink: finalLink,
+          meetingPurpose: finalPurpose,
+          meetingAgenda: finalAgenda,
+          notes: req.body.notes || actionRecord.notes || "",
+          approvedAt: new Date(),
+          approvedBy: hr.fullName || "HR Representative",
+          assignedHR: hr.fullName || "HR Representative",
+          assignedHRId: hr._id,
+          contactMethod: "Email",
+        },
+        $push: {
+          contactHistory: {
+            contactMethod: "Email",
+            contactedAt: new Date(),
+            contactedBy: hr.fullName || "HR Representative",
+            recipientEmail: employee.email || "",
+            meetingDetails: `${finalDate} at ${finalTime} | Link: ${finalLink}`,
+            status: emailResult.success ? "SENT" : "FAILED",
+            note: `Approved retention meeting invitation dispatched via email. Email status: ${emailResult.success ? "Delivered" : emailResult.reason || "Failed"}`,
+          },
+        },
+      },
+      { returnDocument: "after" }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Retention meeting approved and invitation sent.",
+      actionRecord: updated,
+      emailResult,
+    });
+  } catch (error) {
+    console.error("Error approving retention meeting:", error);
+    res.status(500).json({ message: "Failed to approve retention meeting.", error: error.message });
+  }
+};
+
+router.post("/retention-meetings/:id/approve", handleApproveMeeting);
+router.post("/retention/approve-meeting/:id", handleApproveMeeting);
+
+// POST /api/hr/retention-meetings/:id/reject
+// HR rejects a meeting proposal
+const handleRejectMeeting = async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const targetId = req.params.id;
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+    const mongoose = (await import("mongoose")).default;
+
+    const query = {
+      $or: [
+        { _id: mongoose.Types.ObjectId.isValid(targetId) ? new mongoose.Types.ObjectId(targetId) : null },
+        { employeeId: mongoose.Types.ObjectId.isValid(targetId) ? new mongoose.Types.ObjectId(targetId) : null },
+      ].filter((q) => Object.values(q)[0] !== null),
+      companyCode: hr.companyCode.toUpperCase(),
+    };
+
+    const reason = req.body.reason || "Proposal rejected by HR.";
+
+    const updated = await RetentionAction.findOneAndUpdate(
+      query,
+      {
+        $set: {
+          proposalStatus: "REJECTED",
+          status: "Cancelled",
+          rejectionReason: reason,
+          meetingDate: "",
+          meetingTime: "",
+          meetingLink: "",
+        },
+        $push: {
+          contactHistory: {
+            contactMethod: "Other",
+            contactedAt: new Date(),
+            contactedBy: hr.fullName || "HR Representative",
+            status: "REJECTED",
+            note: `Proposal rejected by HR: ${reason}`,
+          },
+        },
+      },
+      { returnDocument: "after" }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Retention meeting record not found." });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Retention meeting proposal rejected.",
+      actionRecord: updated,
+    });
+  } catch (error) {
+    console.error("Error rejecting retention meeting:", error);
+    res.status(500).json({ message: "Failed to reject proposal.", error: error.message });
+  }
+};
+
+router.post("/retention-meetings/:id/reject", handleRejectMeeting);
+router.post("/retention/reject-meeting/:id", handleRejectMeeting);
+
+// GET /api/hr/retention-meetings
+// Lists all retention meetings & proposals for the HR's authorized company
+router.get("/retention-meetings", async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+    const User = (await import("../models/User.js")).default;
+
+    const cases = await RetentionAction.find({
+      companyCode: hr.companyCode.toUpperCase(),
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const enriched = await Promise.all(
+      cases.map(async (c) => {
+        const emp = await User.findById(c.employeeId)
+          .select("fullName email employeeCode phoneNumber")
+          .lean();
+        return { ...c, employee: emp || null };
+      })
+    );
+
+    res.status(200).json({ cases: enriched });
+  } catch (error) {
+    console.error("Error retrieving retention meetings:", error);
+    res.status(500).json({ message: "Failed to retrieve retention meetings.", error: error.message });
+  }
+});
+
+// GET /api/hr/retention-meetings/:employeeId
+// Returns the retention case / proposal for a single employee
+router.get("/retention-meetings/:employeeId", async (req, res) => {
+  try {
+    const hr = req.currentUser;
+    if (!hr || !hr.companyCode) {
+      return res.status(403).json({ message: "HR user is not linked to an authorized company." });
+    }
+
+    const { employeeId } = req.params;
+    const RetentionAction = (await import("../models/RetentionAction.js")).default;
+    const User = (await import("../models/User.js")).default;
+
+    const employee = await User.findOne({
+      _id: employeeId,
+      companyCode: hr.companyCode.toUpperCase(),
+      role: "employee",
+    }).select("fullName email employeeCode phoneNumber companyCode");
+
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found in your organization." });
+    }
+
+    const actionRecord = await RetentionAction.findOne({
+      employeeId,
+      companyCode: hr.companyCode.toUpperCase(),
+    }).lean();
+
+    res.status(200).json({
+      employee,
+      actionRecord: actionRecord || null,
+    });
+  } catch (error) {
+    console.error("Error retrieving retention meeting for employee:", error);
+    res.status(500).json({ message: "Failed to retrieve retention meeting.", error: error.message });
+  }
+});
+
 export default router;
 

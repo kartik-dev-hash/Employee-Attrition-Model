@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import api from "../../api/client";
 import { Toast } from "../common/Toast";
 import { Modal } from "../common/Modal";
-import { sendMeetingInvitationEmail } from "../../utils/emailService";
 import {
   ShieldAlert,
   MessageCircle,
@@ -23,6 +22,11 @@ import {
   RefreshCw,
   Mail,
   User,
+  Check,
+  X,
+  Sparkles,
+  FileText,
+  Send,
 } from "lucide-react";
 
 export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActionUpdated }) => {
@@ -30,22 +34,42 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
   const [toast, setToast] = useState(null);
   const [autoScheduling, setAutoScheduling] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
 
   // Retention record state
   const [actionData, setActionData] = useState({
     status: "Pending",
+    proposalStatus: "NONE",
+    proposalSource: "none",
     assignedHR: "HR Representative",
     meetingDate: "",
     meetingTime: "",
     meetingLocation: "",
     meetingLink: "",
-    contactMethod: "WhatsApp",
+    meetingPurpose: "Confidential Retention & Feedback Discussion",
+    meetingAgenda: "",
+    invitationDraft: { subject: "", message: "" },
+    contactMethod: "Email",
     suggestedActions: [],
     agreedActionPlan: "",
     notes: "",
     followUpDate: "",
     contactHistory: [],
   });
+
+  // Proposal form inputs (for requesting a proposal)
+  const [purposeInput, setPurposeInput] = useState("Confidential Retention & Feedback Discussion");
+  const [notesInput, setNotesInput] = useState("");
+  const [preferredDateInput, setPreferredDateInput] = useState("");
+  const [preferredTimeInput, setPreferredTimeInput] = useState("");
+
+  // Proposal edit inputs (for reviewing & editing proposal before approval)
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editPurpose, setEditPurpose] = useState("");
+  const [editAgenda, setEditAgenda] = useState("");
+  const [editDraftMessage, setEditDraftMessage] = useState("");
 
   const [phoneNumber, setPhoneNumber] = useState(employee?.phoneNumber || "");
   const [employeeEmail, setEmployeeEmail] = useState(employee?.email || "");
@@ -61,7 +85,15 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
     ? `${(mlPrediction.probability * 100).toFixed(1)}%`
     : null;
 
-  const hasScheduledMeeting = Boolean(actionData.meetingDate && actionData.status !== "Cancelled");
+  // Active confirmed meeting (not just a proposal)
+  const hasScheduledMeeting = Boolean(
+    actionData.meetingDate &&
+    actionData.status !== "Cancelled" &&
+    actionData.status !== "PROPOSED" &&
+    actionData.proposalStatus !== "PROPOSED"
+  );
+
+  const isProposed = actionData.proposalStatus === "PROPOSED" || actionData.status === "PROPOSED";
 
   // Derive evidence-based suggested retention actions from feedback
   const generatedSuggestions = [];
@@ -109,23 +141,39 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
     const fetchAction = async () => {
       try {
         setLoading(true);
-        const res = await api.get(`/api/hr/retention/actions/${employee._id}`);
+        const res = await api.get(`/api/hr/retention-meetings/${employee._id}`).catch(() =>
+          api.get(`/api/hr/retention/actions/${employee._id}`)
+        );
         if (isMounted && res.data?.actionRecord) {
           const rec = res.data.actionRecord;
           setActionData({
             status: rec.status || "Pending",
+            proposalStatus: rec.proposalStatus || "NONE",
+            proposalSource: rec.proposalSource || "none",
             assignedHR: rec.assignedHR || "HR Representative",
             meetingDate: rec.meetingDate || "",
             meetingTime: rec.meetingTime || "",
             meetingLocation: rec.meetingLocation || "",
             meetingLink: rec.meetingLink || "",
-            contactMethod: rec.contactMethod || "WhatsApp",
+            meetingPurpose: rec.meetingPurpose || "Confidential Retention & Feedback Discussion",
+            meetingAgenda: rec.meetingAgenda || "",
+            invitationDraft: rec.invitationDraft || { subject: "", message: "" },
+            contactMethod: rec.contactMethod || "Email",
             suggestedActions: rec.suggestedActions || [],
             agreedActionPlan: rec.agreedActionPlan || "",
             notes: rec.notes || "",
             followUpDate: rec.followUpDate || "",
             contactHistory: rec.contactHistory || [],
+            invitationStatus: rec.invitationStatus || "Pending",
           });
+
+          // Pre-populate review fields if proposal is waiting for approval
+          setEditDate(rec.meetingDate || "");
+          setEditTime(rec.meetingTime || "");
+          setEditPurpose(rec.meetingPurpose || "Confidential Retention & Feedback Discussion");
+          setEditAgenda(rec.meetingAgenda || "");
+          setEditDraftMessage(rec.invitationDraft?.message || "");
+
           if (res.data.employee?.phoneNumber) {
             setPhoneNumber(res.data.employee.phoneNumber);
           }
@@ -148,78 +196,143 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
     };
   }, [employee]);
 
-  // Generates a free Jitsi Meet room link for the employee meeting
-  const generateMeetLink = (employeeCode) => {
-    const room = `RetainPulse-${(employeeCode || "meeting").replace(/\s+/g, "")}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-    return `https://meet.jit.si/${room}`;
-  };
-
-  // Auto-schedule a retention meeting via the AI Retention Agent
-  const handleAutoSchedule = async () => {
+  // Request a retention meeting proposal from n8n AI Agent
+  const handleProposeMeeting = async () => {
     setAutoScheduling(true);
     setToast(null);
     try {
-      const res = await api.post(`/api/hr/retention/auto-schedule/${employee._id}`);
-      if (res.data?.scheduled) {
-        const slot = res.data.slot || {};
+      const res = await api.post("/api/hr/retention-meetings/propose", {
+        employeeId: employee._id,
+        purpose: purposeInput,
+        notes: notesInput,
+        preferredDate: preferredDateInput || null,
+        preferredTime: preferredTimeInput || null,
+      });
 
-        // Generate a unique Jitsi Meet link for this meeting
-        const meetingLink = generateMeetLink(employee?.employeeCode);
+      if (res.data?.success) {
+        const proposal = res.data.proposal || {};
+        const rec = res.data.actionRecord || {};
 
-        // Save the meet link back to the record
-        await api.put(`/api/hr/retention/actions/${employee._id}`, {
-          meetingLink,
-        });
+        setActionData((prev) => ({
+          ...prev,
+          status: "PROPOSED",
+          proposalStatus: "PROPOSED",
+          proposalSource: res.data.proposalSource || "none",
+          meetingDate: proposal.proposedDate || rec.meetingDate || "",
+          meetingTime: proposal.proposedTime || rec.meetingTime || "",
+          meetingPurpose: proposal.purpose || purposeInput,
+          meetingAgenda: proposal.agenda || "",
+          invitationDraft: proposal.invitationDraft || {},
+        }));
 
-        // Refresh the retention action record so new meeting date/time appears
-        const refresh = await api.get(`/api/hr/retention/actions/${employee._id}`);
-        if (refresh.data?.actionRecord) {
-          const rec = refresh.data.actionRecord;
-          setActionData((prev) => ({
-            ...prev,
-            ...rec,
-            meetingLink,
-            contactHistory: rec.contactHistory || prev.contactHistory,
-          }));
-        }
+        setEditDate(proposal.proposedDate || rec.meetingDate || "");
+        setEditTime(proposal.proposedTime || rec.meetingTime || "");
+        setEditPurpose(proposal.purpose || purposeInput);
+        setEditAgenda(proposal.agenda || "");
+        setEditDraftMessage(proposal.invitationDraft?.message || "");
 
-        // Send invitation email to the employee
-        const targetEmail = employeeEmail || employee?.email;
-        let emailStatusMsg = "";
-        if (targetEmail) {
-          const emailRes = await sendMeetingInvitationEmail({
-            to_email: targetEmail,
-            to_name: employee.fullName,
-            hr_name: actionData.assignedHR || "HR Team",
-            meeting_date: slot.meetingDate,
-            meeting_time: slot.meetingTime,
-            meeting_link: meetingLink,
-          });
-          emailStatusMsg = emailRes.success
-            ? ` Invitation email sent to ${targetEmail}! ✅`
-            : ` (Email error: ${emailRes.message})`;
-        } else {
-          emailStatusMsg = " (No employee email address found to send invitation).";
-        }
+        const sourceLabel = res.data.proposalSource === "n8n_agent"
+          ? "n8n AI Retention Agent"
+          : "Internal Retention Engine (n8n fallback)";
 
         setToast({
           type: "success",
-          text: `Meeting auto-scheduled for ${slot.meetingDate || "?"} at ${slot.meetingTime || "?"}.${emailStatusMsg}`,
+          text: `Proposal received via ${sourceLabel}! Please review and approve below.`,
         });
+
         if (onActionUpdated) onActionUpdated();
       } else {
         setToast({
           type: "error",
-          text: res.data?.reason || "Employee is not eligible or no available slot was found.",
+          text: res.data?.message || "Could not generate proposal.",
         });
       }
     } catch (err) {
       setToast({
         type: "error",
-        text: err.response?.data?.message || "Auto-schedule request failed. Please try again.",
+        text: err.response?.data?.message || "Meeting proposal request failed. Please try again.",
       });
     } finally {
       setAutoScheduling(false);
+    }
+  };
+
+  // Approve proposal: Reserves the slot, generates link, and dispatches the invitation
+  const handleApproveMeeting = async () => {
+    setApproving(true);
+    setToast(null);
+    try {
+      const res = await api.post(`/api/hr/retention-meetings/${employee._id}/approve`, {
+        meetingDate: editDate,
+        meetingTime: editTime,
+        meetingPurpose: editPurpose,
+        meetingAgenda: editAgenda,
+        invitationDraft: {
+          subject: actionData.invitationDraft?.subject || `Invitation: Retention Discussion — ${employee.fullName}`,
+          message: editDraftMessage,
+        },
+      });
+
+      if (res.data?.success) {
+        const rec = res.data.actionRecord || {};
+        setActionData((prev) => ({
+          ...prev,
+          ...rec,
+          status: "APPROVED",
+          proposalStatus: "APPROVED",
+        }));
+
+        const emailDelivered = res.data.emailResult?.success;
+        const emailMsg = emailDelivered
+          ? " Invitation email dispatched! ✅"
+          : " (Email could not be delivered).";
+
+        setToast({
+          type: "success",
+          text: `Retention meeting confirmed for ${rec.meetingDate} at ${rec.meetingTime}.${emailMsg}`,
+        });
+
+        if (onActionUpdated) onActionUpdated();
+      }
+    } catch (err) {
+      setToast({
+        type: "error",
+        text: err.response?.data?.message || "Failed to approve meeting. Please try again.",
+      });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  // Reject proposal
+  const handleRejectMeeting = async () => {
+    if (!window.confirm("Reject this proposed retention meeting?")) return;
+    setRejecting(true);
+    setToast(null);
+    try {
+      const res = await api.post(`/api/hr/retention-meetings/${employee._id}/reject`, {
+        reason: "Proposal rejected by HR.",
+      });
+
+      if (res.data?.success) {
+        setActionData((prev) => ({
+          ...prev,
+          status: "Cancelled",
+          proposalStatus: "REJECTED",
+          meetingDate: "",
+          meetingTime: "",
+        }));
+
+        setToast({ type: "success", text: "Meeting proposal rejected." });
+        if (onActionUpdated) onActionUpdated();
+      }
+    } catch (err) {
+      setToast({
+        type: "error",
+        text: err.response?.data?.message || "Failed to reject proposal.",
+      });
+    } finally {
+      setRejecting(false);
     }
   };
 
@@ -239,6 +352,7 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
         ...prev,
         status: "Cancelled",
         invitationStatus: "Declined",
+        proposalStatus: "NONE",
         meetingDate: "",
         meetingTime: "",
         meetingLink: "",
@@ -253,7 +367,6 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
       setCancelling(false);
     }
   };
-
 
   // Prepare WhatsApp message and modal
   const handleOpenWhatsApp = () => {
@@ -344,17 +457,17 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
 
         {/* Quick Contact Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          {!hasScheduledMeeting ? (
+          {!hasScheduledMeeting && !isProposed ? (
             <button
               type="button"
-              onClick={handleAutoSchedule}
+              onClick={handleProposeMeeting}
               disabled={autoScheduling}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
             >
               <Bot className="w-4 h-4" />
-              <span>{autoScheduling ? "Scheduling..." : "Auto-Schedule Meeting"}</span>
+              <span>{autoScheduling ? "Connecting n8n..." : "Propose Retention Meeting"}</span>
             </button>
-          ) : (
+          ) : hasScheduledMeeting ? (
             <button
               type="button"
               onClick={handleCancelMeeting}
@@ -364,7 +477,8 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
               <XCircle className="w-4 h-4" />
               <span>{cancelling ? "Cancelling..." : "Cancel Meeting"}</span>
             </button>
-          )}
+          ) : null}
+
           <button
             type="button"
             onClick={handleOpenWhatsApp}
@@ -411,10 +525,9 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
         </p>
       </div>
 
-      {/* Automated Meeting Management Hub */}
+      {/* ── STATE 1: ACTIVE SCHEDULED MEETING ─────────────────────────────── */}
       {hasScheduledMeeting ? (
         <div className="p-5 sm:p-6 bg-white rounded-2xl border border-indigo-100 shadow-sm space-y-5">
-          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 flex-shrink-0">
@@ -422,9 +535,9 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h4 className="text-sm font-bold text-slate-900">Scheduled Retention Meeting</h4>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                    Status: {actionData.status || "In Progress"}
+                  <h4 className="text-sm font-bold text-slate-900">Confirmed Retention Meeting</h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    Status: Approved & Scheduled
                   </span>
                   {actionData.invitationStatus && (
                     <span
@@ -441,7 +554,7 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
                   )}
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Automated retention check-in arranged for <strong>{employee?.fullName}</strong>
+                  Meeting arranged for <strong>{employee?.fullName}</strong>. Invitation delivered via EmailJS/SMTP.
                 </p>
               </div>
             </div>
@@ -449,13 +562,13 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleAutoSchedule}
+                onClick={handleProposeMeeting}
                 disabled={autoScheduling}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                title="Reschedule to next available slot"
+                title="Request new proposal"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${autoScheduling ? "animate-spin" : ""}`} />
-                <span>{autoScheduling ? "Rescheduling..." : "Reschedule"}</span>
+                <span>Reschedule via AI</span>
               </button>
               <button
                 type="button"
@@ -531,8 +644,157 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
             </div>
           ) : null}
         </div>
+      ) : isProposed ? (
+        /* ── STATE 2: AI PROPOSAL AWAITING HR APPROVAL ────────────────────── */
+        <div className="p-5 sm:p-6 bg-white rounded-2xl border-2 border-indigo-200 shadow-md space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 flex-shrink-0 shadow-xs">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-sm font-bold text-slate-900">Retention Meeting Proposal</h4>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                    Awaiting HR Approval
+                  </span>
+                  <span
+                    className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                      actionData.proposalSource === "n8n_agent"
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                    }`}
+                  >
+                    {actionData.proposalSource === "n8n_agent"
+                      ? "🤖 Source: n8n AI Retention Agent"
+                      : "⚙️ Source: Internal Retention Engine (n8n Fallback)"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Review the proposed meeting parameters and invitation draft. You may modify any field before approving.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleProposeMeeting}
+              disabled={autoScheduling}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+              title="Regenerate proposal"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${autoScheduling ? "animate-spin" : ""}`} />
+              <span>Regenerate Proposal</span>
+            </button>
+          </div>
+
+          {/* Notice Banner */}
+          <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-bold">Human-in-the-Loop Safeguard: </strong>
+              This meeting has <strong>not</strong> been booked and <strong>no email</strong> has been sent yet.
+              Please inspect the proposed slot, agenda, and invitation message below, make any necessary adjustments, and click <strong>Approve & Send Invitation</strong> to confirm.
+            </div>
+          </div>
+
+          {/* Form Fields for Review */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* Proposed Date */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Proposed Meeting Date *</label>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Proposed Time */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Proposed Meeting Time (24h) *</label>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                <input
+                  type="time"
+                  value={editTime}
+                  onChange={(e) => setEditTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Meeting Purpose */}
+            <div className="md:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">Discussion Purpose / Title</label>
+              <input
+                type="text"
+                value={editPurpose}
+                onChange={(e) => setEditPurpose(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Proposed Agenda */}
+            <div className="md:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Proposed Agenda & Key Discussion Points</span>
+                <span className="text-[11px] text-slate-400 font-normal">Editable by HR</span>
+              </label>
+              <textarea
+                rows={4}
+                value={editAgenda}
+                onChange={(e) => setEditAgenda(e.target.value)}
+                placeholder="Key talking points for discussion..."
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 leading-relaxed font-mono text-[11px]"
+              />
+            </div>
+
+            {/* Invitation Draft Preview */}
+            <div className="md:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Invitation Email Body (Employee Preview)</span>
+                <span className="text-[11px] text-slate-400 font-normal">Will be sent upon approval</span>
+              </label>
+              <textarea
+                rows={5}
+                value={editDraftMessage}
+                onChange={(e) => setEditDraftMessage(e.target.value)}
+                placeholder="Email body text that the employee will receive..."
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 leading-relaxed text-[11px]"
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={handleRejectMeeting}
+              disabled={rejecting || approving}
+              className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <X className="w-4 h-4 text-rose-600" />
+              <span>{rejecting ? "Rejecting..." : "Reject Proposal"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleApproveMeeting}
+              disabled={approving || rejecting || !editDate || !editTime}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Check className="w-4 h-4" />
+              <span>{approving ? "Confirming & Sending..." : "Approve & Send Invitation"}</span>
+            </button>
+          </div>
+        </div>
       ) : (
-        /* Empty / Not Scheduled State: Rich AI Auto-Schedule Showcase Card */
+        /* ── STATE 3: EMPTY / REQUEST PROPOSAL SHOWCASE ───────────────────── */
         <div className="p-5 sm:p-6 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3.5">
@@ -541,26 +803,51 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-slate-900">One-Click AI Retention Scheduler</h4>
+                  <h4 className="text-sm font-bold text-slate-900">n8n AI Retention Agent</h4>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                    Automated
+                    Webhook Connected
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Let the system automatically arrange a confidential 1-on-1 retention session with <strong>{employee?.fullName}</strong>.
+                  Request a structured retention meeting proposal for <strong>{employee?.fullName}</strong>. You will review and approve before any email is sent.
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={handleAutoSchedule}
+              onClick={handleProposeMeeting}
               disabled={autoScheduling}
               className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Zap className="w-4 h-4 text-amber-300" />
-              <span>{autoScheduling ? "Scheduling Session..." : "Auto-Schedule Retention Meeting"}</span>
+              <span>{autoScheduling ? "Connecting to n8n..." : "Propose Retention Meeting"}</span>
             </button>
+          </div>
+
+          {/* Quick Context Inputs (Optional) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-100">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Meeting Purpose</label>
+              <input
+                type="text"
+                value={purposeInput}
+                onChange={(e) => setPurposeInput(e.target.value)}
+                placeholder="e.g., Confidential Retention Discussion"
+                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">HR Notes / Preferred Timing (Optional)</label>
+              <input
+                type="text"
+                value={notesInput}
+                onChange={(e) => setNotesInput(e.target.value)}
+                placeholder="e.g., Prefer Tuesday afternoon after team sync"
+                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
           </div>
 
           {/* Feature Highlights Grid */}
@@ -581,17 +868,17 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
                 <span>Encrypted Video Conference</span>
               </div>
               <p className="text-slate-500 text-[11px] leading-relaxed">
-                Creates a secure, one-click Jitsi virtual conference room for the employee and assigned HR partner.
+                Generates a secure, one-click Jitsi virtual conference room for the employee and assigned HR partner.
               </p>
             </div>
 
             <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-100 text-xs space-y-1.5">
               <div className="flex items-center gap-2 font-bold text-slate-800">
-                <Mail className="w-4 h-4 text-indigo-500" />
-                <span>Automated Email Invite</span>
+                <ShieldAlert className="w-4 h-4 text-indigo-500" />
+                <span>Approval Safeguard</span>
               </div>
               <p className="text-slate-500 text-[11px] leading-relaxed">
-                Dispatches a branded invitation with meeting link and direct Accept / Reschedule response buttons.
+                AI proposes the meeting; HR reviews and explicitly approves the draft and slot before any invitation is sent.
               </p>
             </div>
           </div>
@@ -611,7 +898,11 @@ export const RetentionActionCenter = ({ employee, feedback, mlPrediction, onActi
               <div key={idx} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                 <div>
                   <span className="font-bold text-slate-800">
-                    {item.contactMethod === "Email" ? "📧 Meeting Invitation" : "💬 WhatsApp Outreach"}
+                    {item.contactMethod === "Email"
+                      ? "📧 Meeting Invitation"
+                      : item.contactMethod === "WhatsApp"
+                      ? "💬 WhatsApp Outreach"
+                      : "📝 " + (item.status || "Note")}
                   </span>
                   <span className="text-slate-400 text-[11px] ml-2">by {item.contactedBy || "HR Team"}</span>
                   {item.meetingDetails && (

@@ -16,15 +16,17 @@ import {
   Zap,
   Filter,
   ChevronDown,
+  Sparkles,
+  Check,
 } from "lucide-react";
 
 /**
- * RetentionCases – HR page to manage all auto-scheduled retention meetings.
+ * RetentionCases – HR page to manage all auto-scheduled retention meetings and proposals.
  *
  * Features:
- *  • Bulk auto-schedule all eligible employees with one click
- *  • List all retention cases with status filters
+ *  • Lists all retention cases & proposals with status filters
  *  • See employee invitation responses
+ *  • View proposals awaiting HR approval
  *  • View exception queue
  *  • Cancel a scheduled meeting
  */
@@ -44,7 +46,9 @@ export const RetentionCases = () => {
   const fetchCases = async () => {
     try {
       setLoading(true);
-      const res = await api.get("/api/hr/retention/all-cases");
+      const res = await api.get("/api/hr/retention-meetings").catch(() =>
+        api.get("/api/hr/retention/all-cases")
+      );
       setCases(res.data?.cases || []);
     } catch (err) {
       console.error("Error loading retention cases:", err);
@@ -96,11 +100,13 @@ export const RetentionCases = () => {
   };
 
   // ── Filters ──────────────────────────────────────────────────────────────
-  const FILTERS = ["All", "Pending", "In Progress", "Completed", "Cancelled", "Exception Queue"];
+  const FILTERS = ["All", "Proposed", "Approved", "In Progress", "Completed", "Cancelled", "Exception Queue"];
 
   const filtered = cases.filter((c) => {
     if (filter === "All") return true;
     if (filter === "Exception Queue") return c.inExceptionQueue;
+    if (filter === "Proposed") return c.proposalStatus === "PROPOSED" || c.status === "PROPOSED";
+    if (filter === "Approved") return c.status === "APPROVED" || c.proposalStatus === "APPROVED";
     return c.invitationStatus === filter || c.status === filter;
   });
 
@@ -114,6 +120,10 @@ export const RetentionCases = () => {
 
   const statusBadge = {
     Pending: "bg-slate-100 text-slate-700",
+    PROPOSED: "bg-amber-100 text-amber-800 border border-amber-200",
+    Proposed: "bg-amber-100 text-amber-800 border border-amber-200",
+    APPROVED: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+    Approved: "bg-emerald-100 text-emerald-800 border border-emerald-200",
     "In Progress": "bg-indigo-100 text-indigo-700",
     Completed: "bg-emerald-100 text-emerald-700",
     Cancelled: "bg-rose-100 text-rose-700",
@@ -135,7 +145,7 @@ export const RetentionCases = () => {
             <h2 className="text-xl font-bold text-slate-900">AI Retention Agent</h2>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Automatically schedule retention meetings for at-risk employees based on ML predictions and survey risk.
+            Manage AI-generated retention proposals and confirmed meetings for at-risk team members.
           </p>
         </div>
 
@@ -167,14 +177,14 @@ export const RetentionCases = () => {
         {[
           { label: "Total Cases", value: cases.length, icon: Users, color: "indigo" },
           {
-            label: "Awaiting Response",
-            value: cases.filter((c) => c.invitationStatus === "Pending" && c.meetingDate).length,
+            label: "Proposals Pending",
+            value: cases.filter((c) => c.proposalStatus === "PROPOSED" || c.status === "PROPOSED").length,
             icon: Clock,
             color: "amber",
           },
           {
-            label: "Accepted",
-            value: cases.filter((c) => c.invitationStatus === "Accepted").length,
+            label: "Approved / Active",
+            value: cases.filter((c) => (c.status === "APPROVED" || c.status === "In Progress") && c.meetingDate).length,
             icon: CheckCircle2,
             color: "emerald",
           },
@@ -225,6 +235,11 @@ export const RetentionCases = () => {
                 {cases.filter((c) => c.inExceptionQueue).length}
               </span>
             )}
+            {f === "Proposed" && cases.filter((c) => c.proposalStatus === "PROPOSED" || c.status === "PROPOSED").length > 0 && (
+              <span className="ml-1 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                {cases.filter((c) => c.proposalStatus === "PROPOSED" || c.status === "PROPOSED").length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -238,106 +253,122 @@ export const RetentionCases = () => {
         </Card>
       ) : (
         <div className="space-y-3">
-          {filtered.map((c) => (
-            <div
-              key={c._id}
-              className={`p-4 rounded-2xl border bg-white space-y-3 ${
-                c.inExceptionQueue ? "border-rose-200 bg-rose-50/30" : "border-slate-200"
-              }`}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                {/* Employee info */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white font-bold text-sm flex items-center justify-center flex-shrink-0">
-                    {c.employee?.fullName?.charAt(0)?.toUpperCase() || "?"}
+          {filtered.map((c) => {
+            const isCaseProposed = c.proposalStatus === "PROPOSED" || c.status === "PROPOSED";
+            return (
+              <div
+                key={c._id}
+                className={`p-4 rounded-2xl border bg-white space-y-3 ${
+                  c.inExceptionQueue
+                    ? "border-rose-200 bg-rose-50/30"
+                    : isCaseProposed
+                    ? "border-amber-200 bg-amber-50/20"
+                    : "border-slate-200"
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {/* Employee info */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white font-bold text-sm flex items-center justify-center flex-shrink-0">
+                      {c.employee?.fullName?.charAt(0)?.toUpperCase() || "?"}
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">
+                        {c.employee?.fullName || "Unknown"}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {c.employee?.email || ""} · {c.employee?.employeeCode || ""}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-800">
-                      {c.employee?.fullName || "Unknown"}
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      {c.employee?.email || ""} · {c.employee?.employeeCode || ""}
-                    </p>
-                  </div>
-                </div>
 
-                {/* Status badges */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {c.autoScheduled && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1">
-                      <Bot className="w-3 h-3" /> Auto-Scheduled
-                    </span>
-                  )}
-                  {c.inExceptionQueue && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Exception
-                    </span>
-                  )}
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      statusBadge[c.status] || "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {c.status}
-                  </span>
-                  {c.invitationStatus && c.meetingDate && (
+                  {/* Status badges */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {c.proposalSource && c.proposalSource !== "none" && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        {c.proposalSource === "n8n_agent" ? "n8n Agent" : "Internal AI"}
+                      </span>
+                    )}
+
+                    {isCaseProposed && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                        Awaiting Approval
+                      </span>
+                    )}
+
+                    {c.inExceptionQueue && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Exception
+                      </span>
+                    )}
+
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        invitationBadge[c.invitationStatus] || "bg-slate-100 text-slate-700"
+                        statusBadge[c.status] || "bg-slate-100 text-slate-700"
                       }`}
                     >
-                      Employee: {c.invitationStatus === "RescheduleRequested" ? "Reschedule Req." : c.invitationStatus}
+                      {c.status}
                     </span>
-                  )}
-                </div>
-              </div>
 
-              {/* Exception reason */}
-              {c.inExceptionQueue && c.exceptionReason && (
-                <div className="flex items-start gap-2 p-2.5 bg-rose-100/60 rounded-xl text-xs text-rose-800">
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  <span>{c.exceptionReason}</span>
+                    {c.invitationStatus && c.meetingDate && !isCaseProposed && (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          invitationBadge[c.invitationStatus] || "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        Employee: {c.invitationStatus === "RescheduleRequested" ? "Reschedule Req." : c.invitationStatus}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              )}
 
-              {/* Reschedule request note */}
-              {c.invitationStatus === "RescheduleRequested" && c.notes && (
-                <div className="flex items-start gap-2 p-2.5 bg-indigo-50 rounded-xl text-xs text-indigo-800">
-                  <RefreshCw className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  <span>{c.notes}</span>
-                </div>
-              )}
-
-              {/* Meeting time */}
-              {c.meetingDate && (
-                <div className="flex items-center gap-4 text-xs text-slate-600">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    {c.meetingDate}
-                  </span>
-                  {c.meetingTime && (
-                    <span className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      {c.meetingTime}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
-                {c.status !== "Cancelled" && c.status !== "Completed" && c.meetingDate && (
-                  <button
-                    onClick={() => setCancelTarget({ employeeId: c.employeeId, name: c.employee?.fullName })}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all cursor-pointer"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    Cancel
-                  </button>
+                {/* Exception reason */}
+                {c.inExceptionQueue && c.exceptionReason && (
+                  <div className="flex items-start gap-2 p-2.5 bg-rose-100/60 rounded-xl text-xs text-rose-800">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{c.exceptionReason}</span>
+                  </div>
                 )}
+
+                {/* Meeting purpose / proposed slot info */}
+                {c.meetingPurpose && (
+                  <p className="text-xs text-slate-600 font-medium">
+                    Purpose: <span className="font-semibold text-slate-800">{c.meetingPurpose}</span>
+                  </p>
+                )}
+
+                {/* Meeting time */}
+                {c.meetingDate && (
+                  <div className="flex items-center gap-4 text-xs text-slate-600">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                      {isCaseProposed ? "Proposed: " : "Scheduled: "} {c.meetingDate}
+                    </span>
+                    {c.meetingTime && (
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        {c.meetingTime}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                  {c.status !== "Cancelled" && c.status !== "Completed" && c.meetingDate && !isCaseProposed && (
+                    <button
+                      onClick={() => setCancelTarget({ employeeId: c.employeeId, name: c.employee?.fullName })}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-all cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
