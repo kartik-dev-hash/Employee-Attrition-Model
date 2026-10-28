@@ -18,7 +18,7 @@
 | Feature | Description |
 |---|---|
 | 🤖 **ML Attrition Prediction** | Scikit-learn Random Forest model trained on the IBM HR Analytics dataset. Predicts attrition probability (`HIGH_RISK`, `MEDIUM_RISK`, `LOW_RISK`) using 4 key sentiment metrics. |
-| ⚡ **External n8n AI Agent Integration** | Connects to an external cloud-hosted n8n workflow (`https://retainpulse.app.n8n.cloud/webhook/retention-meeting`) to autonomously formulate meeting proposals, agendas, and personalized invitation drafts. |
+| ⚡ **External n8n AI Agent Integration** | Connects to an external cloud-hosted n8n workflow (`https://retainpulse1.app.n8n.cloud/webhook/retention-meeting`) to autonomously formulate meeting proposals, agendas, and personalized invitation drafts. |
 | 🛡️ **Human-in-the-Loop Review** | Proposals from the AI agent are staged as `Proposed` in MongoDB. HR retains full control to edit dates, times, agenda, and draft before clicking **Approve & Send** or **Reject**. |
 | 🔄 **Deterministic Fail-Safe Fallback** | Built-in fallback engine (`generateInternalRetentionProposal`) automatically takes over if n8n is offline, times out (12s), or requires authentication, ensuring zero HR workflow interruption. |
 | 📊 **Interactive HR Analytics** | Visual sentiment distributions, department health, risk categorization, and trend analysis using Recharts. |
@@ -48,7 +48,7 @@
 - **node-cron** — Automated monthly survey reminder schedules
 
 ### AI & Workflow Automation
-- **n8n AI Workflow Agent** — Cloud-hosted workflow webhook (`https://retainpulse.app.n8n.cloud/webhook/retention-meeting`)
+- **n8n AI Workflow Agent** — Cloud-hosted workflow webhook (`https://retainpulse1.app.n8n.cloud/webhook/retention-meeting`)
 - **Native HTTPS with Fallback** — Resilience engine with timeout handling, SSL leaf verification management, and deterministic fallback generation
 
 ### Machine Learning
@@ -131,7 +131,7 @@ RetainPulse integrates an external **n8n AI Workflow Agent** to assist HR with t
 [ Express Backend: POST /retention-meetings/propose ]
                     │
                     ├──► Calls n8n Cloud Webhook (Dual Payload)
-                    │    https://retainpulse.app.n8n.cloud/webhook/retention-meeting
+                    │    https://retainpulse1.app.n8n.cloud/webhook/retention-meeting
                     │
        ┌────────────┴────────────┐
        ▼                         ▼
@@ -284,7 +284,7 @@ MONGO_URI=mongodb://127.0.0.1:27017/employeeAttrition
 JWT_SECRET=your_super_secret_jwt_key_here
 
 # External n8n AI Agent Configuration
-N8N_RETENTION_WEBHOOK_URL=https://retainpulse.app.n8n.cloud/webhook/retention-meeting
+N8N_RETENTION_WEBHOOK_URL=https://retainpulse1.app.n8n.cloud/webhook/retention-meeting
 N8N_AGENT_SECRET=your_n8n_secret_token_if_auth_enabled
 N8N_HEADER_NAME=x-n8n-agent-secret
 N8N_TIMEOUT_MS=12000

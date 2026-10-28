@@ -20,7 +20,7 @@ import { URL } from "url";
 // Configurable environment variables
 const N8N_RETENTION_WEBHOOK_URL =
   process.env.N8N_RETENTION_WEBHOOK_URL?.trim() ||
-  "https://retainpulse.app.n8n.cloud/webhook/retention-meeting";
+  "https://retainpulse1.app.n8n.cloud/webhook/retention-meeting";
 
 const N8N_AGENT_SECRET = process.env.N8N_AGENT_SECRET?.trim() || "";
 const N8N_HEADER_NAME = process.env.N8N_HEADER_NAME?.trim() || "x-n8n-agent-secret";
