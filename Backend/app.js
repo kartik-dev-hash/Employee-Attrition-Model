@@ -14,8 +14,11 @@ import { initializeFeedbackScheduler } from "./services/reminderScheduler.js";
 
 dotenv.config();
 
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://127.0.0.1:27017/empAttrition";
+
 mongoose
-  .connect("mongodb://127.0.0.1:27017/empAttrition")
+  .connect(MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB Connected");
   })
@@ -32,7 +35,7 @@ app.use(
         !origin ||
         /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
         /^http:\/\/(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin);
-      callback(isAllowed ? null : new Error("CORS blocked"), isAllowed);
+      callback(null, true);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
