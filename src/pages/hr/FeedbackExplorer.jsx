@@ -98,6 +98,25 @@ export const FeedbackExplorer = () => {
       ),
     },
     {
+      header: "Cycle / Date",
+      cell: (row) => (
+        <div className="text-xs">
+          <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 block w-fit">
+            {row.feedbackPeriod || "Cycle N/A"}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">
+            {row.submittedAt
+              ? new Date(row.submittedAt).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : "Date N/A"}
+          </span>
+        </div>
+      ),
+    },
+    {
       header: "Attrition Risk",
       cell: (row) => {
         const ml = row.mlPrediction;

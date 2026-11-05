@@ -89,12 +89,25 @@ export const EmployeeDirectory = () => {
     },
     {
       header: "Feedback Status",
-      cell: (row) =>
-        row.submitted ? (
-          <StatusBadge type="submitted" label="Submitted" />
-        ) : (
-          <StatusBadge type="pending" label="Pending" />
-        ),
+      cell: (row) => {
+        const past = feedbacks.find(
+          (f) => f.employeeId === row._id || f.employeeId?._id === row._id,
+        );
+        return (
+          <div className="flex flex-col items-start gap-1">
+            {row.submitted ? (
+              <StatusBadge type="submitted" label="Submitted (This Month)" />
+            ) : (
+              <StatusBadge type="pending" label="Pending (This Month)" />
+            )}
+            {past && !row.submitted && (
+              <span className="text-[11px] font-medium text-slate-500">
+                Last: {past.feedbackPeriod || (past.submittedAt ? new Date(past.submittedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "Earlier")}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       header: "Attrition Risk",

@@ -177,7 +177,25 @@ export const EmployeeDetailView = ({
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
                   <div>
                     <h3 className="text-base font-bold text-slate-900">Workplace Dimension Ratings</h3>
-                    <p className="text-xs text-slate-500">Employee ratings on a 1 to 5 scale</p>
+                    <div className="flex items-center flex-wrap gap-2 text-xs text-slate-500 mt-1">
+                      <span>Employee ratings on a 1 to 5 scale</span>
+                      {feedback.submittedAt && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <span>
+                            Submitted: <strong className="text-slate-700">{new Date(feedback.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong>
+                          </span>
+                        </>
+                      )}
+                      {feedback.feedbackPeriod && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md font-semibold text-[11px]">
+                            Cycle: {feedback.feedbackPeriod}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2.5">
                     {avgRating && (
