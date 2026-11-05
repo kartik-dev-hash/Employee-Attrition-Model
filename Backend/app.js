@@ -490,7 +490,9 @@ app.get("/hr/employees", isLogedIn, requireRole("hr"), async (req, res) => {
 
     const feedbacks = await EmployeeFeedback.find({
       employeeId: { $in: employeeIds },
-    });
+    })
+      .sort({ submittedAt: -1, createdAt: -1 })
+      .lean();
 
     res.status(200).json({
       companyCode: hr.companyCode,

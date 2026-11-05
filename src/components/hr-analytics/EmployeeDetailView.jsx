@@ -16,21 +16,34 @@ import {
 export const EmployeeDetailView = ({
   employee,
   feedback,
+  allFeedbacks = [],
   initialTab = "overview",
   backLabel = "Back to Employee Directory",
   onBack,
   onRefresh,
 }) => {
   const [activeTab, setActiveTab] = useState(initialTab);
+  // Default to the latest feedback (first item in sorted list)
+  const initialFeedback = (allFeedbacks && allFeedbacks.length > 0) ? allFeedbacks[0] : feedback;
+  const [selectedFeedback, setSelectedFeedback] = useState(initialFeedback);
+
+  // Sync if feedback or allFeedbacks prop changes
+  React.useEffect(() => {
+    if (allFeedbacks && allFeedbacks.length > 0) {
+      setSelectedFeedback(allFeedbacks[0]);
+    } else {
+      setSelectedFeedback(feedback);
+    }
+  }, [feedback, allFeedbacks]);
 
   if (!employee) return null;
 
-  const avgRating = feedback
+  const avgRating = selectedFeedback
     ? (
-        ((feedback.jobSatisfaction || 0) +
-          (feedback.workEnvironment || 0) +
-          (feedback.workLifeBalance || 0) +
-          (feedback.growth || 0)) /
+        ((selectedFeedback.jobSatisfaction || 0) +
+          (selectedFeedback.workEnvironment || 0) +
+          (selectedFeedback.workLifeBalance || 0) +
+          (selectedFeedback.growth || 0)) /
         4
       ).toFixed(1)
     : null;
@@ -162,7 +175,7 @@ export const EmployeeDetailView = ({
           })()}
 
           {/* Feedback Section */}
-          {!feedback ? (
+          {!selectedFeedback ? (
             <div className="p-10 bg-white rounded-3xl border border-slate-200 text-center space-y-3 shadow-xs">
               <Clock className="w-10 h-10 text-amber-500 mx-auto" />
               <h4 className="text-base font-bold text-slate-800">Feedback Not Submitted Yet</h4>
@@ -172,6 +185,35 @@ export const EmployeeDetailView = ({
             </div>
           ) : (
             <div className="space-y-6">
+              {/* Cycle Selector if multiple cycles exist */}
+              {allFeedbacks && allFeedbacks.length > 1 && (
+                <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-indigo-900">Feedback Cycles:</span>
+                    <span className="text-xs text-indigo-600">({allFeedbacks.length} submissions found)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {allFeedbacks.map((f, idx) => {
+                      const isSelected = selectedFeedback?._id === f._id || (!selectedFeedback && idx === 0);
+                      return (
+                        <button
+                          key={f._id || idx}
+                          type="button"
+                          onClick={() => setSelectedFeedback(f)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-indigo-600 text-white shadow-xs"
+                              : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                          }`}
+                        >
+                          {f.feedbackPeriod || "Cycle"} {idx === 0 ? "★ Latest" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Submitted Ratings Grid */}
               <div className="p-6 bg-white rounded-3xl border border-slate-200 space-y-5 shadow-xs">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
@@ -179,19 +221,19 @@ export const EmployeeDetailView = ({
                     <h3 className="text-base font-bold text-slate-900">Workplace Dimension Ratings</h3>
                     <div className="flex items-center flex-wrap gap-2 text-xs text-slate-500 mt-1">
                       <span>Employee ratings on a 1 to 5 scale</span>
-                      {feedback.submittedAt && (
+                      {selectedFeedback.submittedAt && (
                         <>
                           <span className="text-slate-300">•</span>
                           <span>
-                            Submitted: <strong className="text-slate-700">{new Date(feedback.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong>
+                            Submitted: <strong className="text-slate-700">{new Date(selectedFeedback.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</strong>
                           </span>
                         </>
                       )}
-                      {feedback.feedbackPeriod && (
+                      {selectedFeedback.feedbackPeriod && (
                         <>
                           <span className="text-slate-300">•</span>
                           <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md font-semibold text-[11px]">
-                            Cycle: {feedback.feedbackPeriod}
+                            Cycle: {selectedFeedback.feedbackPeriod}
                           </span>
                         </>
                       )}
@@ -210,22 +252,22 @@ export const EmployeeDetailView = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1.5">
                     <span className="text-xs font-semibold text-slate-500 block">Job Satisfaction</span>
-                    <RatingStars value={feedback.jobSatisfaction} disabled />
+                    <RatingStars value={selectedFeedback.jobSatisfaction} disabled />
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1.5">
                     <span className="text-xs font-semibold text-slate-500 block">Work Environment</span>
-                    <RatingStars value={feedback.workEnvironment} disabled />
+                    <RatingStars value={selectedFeedback.workEnvironment} disabled />
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1.5">
                     <span className="text-xs font-semibold text-slate-500 block">Work-Life Balance</span>
-                    <RatingStars value={feedback.workLifeBalance} disabled />
+                    <RatingStars value={selectedFeedback.workLifeBalance} disabled />
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1.5">
                     <span className="text-xs font-semibold text-slate-500 block">Growth Opportunities</span>
-                    <RatingStars value={feedback.growth} disabled />
+                    <RatingStars value={selectedFeedback.growth} disabled />
                   </div>
                 </div>
               </div>
@@ -240,22 +282,22 @@ export const EmployeeDetailView = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1">
                     <strong className="block text-slate-800 font-bold">Manager & Team Support Sentiment</strong>
-                    <p className="text-slate-600 leading-relaxed">{feedback.manager || "No response provided."}</p>
+                    <p className="text-slate-600 leading-relaxed">{selectedFeedback.manager || "No response provided."}</p>
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1">
                     <strong className="block text-slate-800 font-bold">What the Employee Liked Most</strong>
-                    <p className="text-slate-600 leading-relaxed">{feedback.likedMost || "No response provided."}</p>
+                    <p className="text-slate-600 leading-relaxed">{selectedFeedback.likedMost || "No response provided."}</p>
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1">
                     <strong className="block text-slate-800 font-bold">Suggested Workplace Improvements</strong>
-                    <p className="text-slate-600 leading-relaxed">{feedback.improvement || "No response provided."}</p>
+                    <p className="text-slate-600 leading-relaxed">{selectedFeedback.improvement || "No response provided."}</p>
                   </div>
 
                   <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1">
                     <strong className="block text-slate-800 font-bold">Additional Comments & Observations</strong>
-                    <p className="text-slate-600 leading-relaxed">{feedback.comments || "No additional comments."}</p>
+                    <p className="text-slate-600 leading-relaxed">{selectedFeedback.comments || "No additional comments."}</p>
                   </div>
                 </div>
               </div>
@@ -268,7 +310,7 @@ export const EmployeeDetailView = ({
       {activeTab === "retention" && (
         <RetentionActionCenter
           employee={employee}
-          feedback={feedback}
+          feedback={selectedFeedback}
           mlPrediction={employee.mlPrediction}
           onActionUpdated={onRefresh}
         />

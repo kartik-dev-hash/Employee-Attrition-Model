@@ -15,6 +15,7 @@ export const EmployeeDirectory = () => {
   // Selected Employee Modal
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [selectedEmpFeedback, setSelectedEmpFeedback] = useState(null);
+  const [selectedEmpAllFeedbacks, setSelectedEmpAllFeedbacks] = useState([]);
   const [modalTab, setModalTab] = useState("overview"); // 'overview' | 'retention'
 
   const fetchEmployees = async () => {
@@ -34,22 +35,31 @@ export const EmployeeDirectory = () => {
     fetchEmployees();
   }, []);
 
+  const getSortedFeedbacksForEmp = (empId) => {
+    const list = feedbacks.filter(
+      (f) => f.employeeId === empId || f.employeeId?._id === empId,
+    );
+    return list.sort(
+      (a, b) =>
+        new Date(b.submittedAt || b.createdAt || 0) -
+        new Date(a.submittedAt || a.createdAt || 0),
+    );
+  };
+
   const handleViewEmployee = (emp) => {
     setSelectedEmp(emp);
     setModalTab("overview");
-    const foundFeed = feedbacks.find(
-      (f) => f.employeeId === emp._id || f.employeeId?._id === emp._id,
-    );
-    setSelectedEmpFeedback(foundFeed || null);
+    const empFeeds = getSortedFeedbacksForEmp(emp._id);
+    setSelectedEmpAllFeedbacks(empFeeds);
+    setSelectedEmpFeedback(empFeeds[0] || null);
   };
 
   const handleOpenRetention = (emp) => {
     setSelectedEmp(emp);
     setModalTab("retention");
-    const foundFeed = feedbacks.find(
-      (f) => f.employeeId === emp._id || f.employeeId?._id === emp._id,
-    );
-    setSelectedEmpFeedback(foundFeed || null);
+    const empFeeds = getSortedFeedbacksForEmp(emp._id);
+    setSelectedEmpAllFeedbacks(empFeeds);
+    setSelectedEmpFeedback(empFeeds[0] || null);
   };
 
   const columns = [
@@ -186,6 +196,7 @@ export const EmployeeDirectory = () => {
       <EmployeeDetailView
         employee={selectedEmp}
         feedback={selectedEmpFeedback}
+        allFeedbacks={selectedEmpAllFeedbacks}
         initialTab={modalTab}
         onBack={() => {
           setSelectedEmp(null);
