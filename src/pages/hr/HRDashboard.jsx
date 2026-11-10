@@ -208,14 +208,59 @@ export const HRDashboard = () => {
   const submittedCount = data.submittedCount || 0;
   const pendingCount = data.pendingFeedbacks || 0;
 
-  // Calculate high risk from feedback scores (avg ≤ 2.5 = high risk, matching backend threshold)
-  const highRiskCount = data.feedbacks?.filter((f) => {
-    const scores = [f.jobSatisfaction, f.workEnvironment, f.workLifeBalance, f.growth].filter(
-      (s) => typeof s === "number"
-    );
-    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+  // Map each employee to their latest feedback submission
+  const employeeFeedbackMap = {};
+  (data.feedbacks || []).forEach((f) => {
+    const empId = String(f.employeeId?._id || f.employeeId);
+    if (
+      !employeeFeedbackMap[empId] ||
+      new Date(f.submittedAt || f.createdAt || 0) >
+        new Date(
+          employeeFeedbackMap[empId].submittedAt ||
+            employeeFeedbackMap[empId].createdAt ||
+            0,
+        )
+    ) {
+      employeeFeedbackMap[empId] = f;
+    }
+  });
+
+  const isFeedbackHighRisk = (f) => {
+    if (!f) return false;
+    const scores = [
+      f.jobSatisfaction,
+      f.workEnvironment,
+      f.workLifeBalance,
+      f.growth,
+    ].filter((s) => typeof s === "number");
+    const avg = scores.length
+      ? scores.reduce((a, b) => a + b, 0) / scores.length
+      : null;
     return avg !== null && avg <= 2.5;
-  }).length || 0;
+  };
+
+  const currentPeriod =
+    data.currentPeriod ||
+    `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+
+  // Current month: submitted this month with avg rating <= 2.5
+  const currentMonthHighRiskEmps = (data.employees || []).filter((emp) => {
+    const f = employeeFeedbackMap[String(emp._id)];
+    if (!f) return false;
+    const isThisMonth = f.feedbackPeriod === currentPeriod;
+    return isThisMonth && isFeedbackHighRisk(f);
+  });
+
+  // Past cycle: latest feedback was in past cycle with avg <= 2.5 (awaiting current survey)
+  const pastCycleHighRiskEmps = (data.employees || []).filter((emp) => {
+    const f = employeeFeedbackMap[String(emp._id)];
+    if (!f) return false;
+    const isThisMonth = f.feedbackPeriod === currentPeriod;
+    return !isThisMonth && isFeedbackHighRisk(f);
+  });
+
+  const highRiskCount = currentMonthHighRiskEmps.length;
+  const pastRiskCount = pastCycleHighRiskEmps.length;
 
   return (
     <div className="space-y-6">
@@ -295,8 +340,21 @@ export const HRDashboard = () => {
           value={highRiskCount}
           icon={AlertTriangle}
           color="rose"
-          subtext="Identified by ML & Feedback"
-          badgeText={highRiskCount > 0 ? "Requires Review" : "Stable"}
+          subtext={
+            pastRiskCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setActiveModal("pastRisk")}
+                className="text-indigo-600 hover:text-indigo-800 font-semibold underline underline-offset-2 cursor-pointer flex items-center gap-1 text-[11px] text-left transition-colors"
+                title="Click to view past cycle at-risk roster"
+              >
+                <span>+{pastRiskCount} from past cycle (view)</span>
+              </button>
+            ) : (
+              "Identified by ML & Feedback"
+            )
+          }
+          badgeText={highRiskCount > 0 ? "Requires Review" : "Stable This Month"}
         />
       </div>
 
@@ -573,6 +631,72 @@ export const HRDashboard = () => {
             {modalLoading ? "Registering HR..." : "Register HR Admin Account"}
           </button>
         </form>
+      </Modal>
+
+      {/* Modal: Past Cycle At-Risk Employees */}
+      <Modal
+        isOpen={activeModal === "pastRisk"}
+        onClose={() => setActiveModal(null)}
+        title="Past Cycle At-Risk Employees"
+        subtitle="Team members whose last feedback was high-risk and are awaiting this month's survey"
+        icon={AlertTriangle}
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-4">
+          <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/90 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="leading-relaxed">
+              These <strong>{pastRiskCount} employees</strong> had an average rating ≤ 2.5 in past cycles and have not completed their <strong>{currentPeriod}</strong> pulse survey yet.
+            </p>
+            <Link
+              to="/hr/employees"
+              onClick={() => setActiveModal(null)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl whitespace-nowrap text-xs shadow-xs transition flex items-center gap-1 self-start sm:self-auto cursor-pointer"
+            >
+              <span>Directory</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-white">
+            {pastCycleHighRiskEmps.map((emp) => {
+              const f = employeeFeedbackMap[String(emp._id)];
+              const scores = f ? [f.jobSatisfaction, f.workEnvironment, f.workLifeBalance, f.growth].filter(s => typeof s === "number") : [];
+              const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : "—";
+              return (
+                <div key={emp._id} className="p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-rose-100 text-rose-700 font-bold text-xs flex items-center justify-center flex-shrink-0 shadow-2xs">
+                      {emp.fullName?.charAt(0)?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate">{emp.fullName}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{emp.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full">
+                      ★ {avg} ({f?.feedbackPeriod || "Past"})
+                    </span>
+                    <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md font-mono border border-slate-200">
+                      {emp.employeeCode}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setActiveModal(null)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
