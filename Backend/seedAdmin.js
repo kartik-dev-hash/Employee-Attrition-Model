@@ -9,26 +9,34 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/empAttriti
 
 async function seedPlatformAdmin() {
   try {
-    await mongoose.connect(MONGO_URI);
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 60000,
+      connectTimeoutMS: 60000,
+    });
     console.log("✅ MongoDB Connected for seeding");
 
-    const adminEmail = "admin@platform.com";
-    const existingAdmin = await User.findOne({ email: adminEmail });
+    const newAdminEmail = "admin123@gmail.com";
+    const newAdminPassword = "1234";
+    const hashedPassword = await bcrypt.hash(newAdminPassword, 10);
 
-    if (existingAdmin) {
-      console.log("ℹ️ Platform Admin already exists:", adminEmail);
-    } else {
-      const hashedPassword = await bcrypt.hash("AdminPass123!", 10);
-      const admin = await User.create({
-        email: adminEmail,
-        password: hashedPassword,
-        fullName: "System Platform Admin",
-        role: "platformAdmin",
-      });
-      console.log("🚀 Platform Admin created successfully!");
-      console.log("   Email:", admin.email);
-      console.log("   Password: AdminPass123!");
-    }
+    // Update existing platform admin or create new one
+    const result = await User.findOneAndUpdate(
+      { role: "platformAdmin" },
+      {
+        $set: {
+          email: newAdminEmail,
+          password: hashedPassword,
+          fullName: "System Platform Admin",
+          role: "platformAdmin",
+        },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
+
+    console.log("🚀 Platform Admin updated/created successfully!");
+    console.log("   Email:", result.email);
+    console.log("   Password:", newAdminPassword);
+    console.log("   Role:", result.role);
   } catch (error) {
     console.error("❌ Seeding Error:", error);
   } finally {

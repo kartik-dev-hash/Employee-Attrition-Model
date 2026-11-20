@@ -19,8 +19,25 @@ const MONGO_URI =
 
 mongoose
   .connect(MONGO_URI)
-  .then(() => {
+  .then(async () => {
     console.log("✅ MongoDB Connected");
+    // ONE-TIME ADMIN MIGRATION — remove after first deploy
+    try {
+      const existing = await User.findOne({ role: "platformAdmin" });
+      if (existing && existing.email !== "admin123@gmail.com") {
+        existing.email = "admin123@gmail.com";
+        existing.password = await bcrypt.hash("1234", 10);
+        await existing.save();
+        console.log("✅ Platform Admin credentials updated to admin123@gmail.com");
+      } else if (!existing) {
+        console.log("⚠️ No platformAdmin found in DB");
+      } else {
+        console.log("ℹ️ Platform Admin already has the new email, no update needed");
+      }
+    } catch (migErr) {
+      console.error("⚠️ Admin migration error:", migErr.message);
+    }
+    // END ONE-TIME MIGRATION
   })
   .catch((err) => console.log("❌ MongoDB Error:", err));
 
